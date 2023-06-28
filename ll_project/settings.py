@@ -9,10 +9,11 @@ https://docs.djangoproject.com/en/4.2/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.2/ref/settings/
 """
-
+import base64
+import json
+import os
+import sys
 from pathlib import Path
-
-from platformshconfig import Config
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -26,21 +27,54 @@ SECRET_KEY = "django-insecure-qly^sknk457!lp7wn)fqb57j%q^c!yw^p599*gq+-v9zpu5a4s
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+    'localhost',
+    '127.0.0.1',
+    '.platformsh.site',
+]
 
 # Application definition
 
-config = Config()
-if config.is_valid_platform():  # (2)
-    ALLOWED_HOSTS.append('.platformsh.site')  # (3)
+PLATFORMSH_DB_RELATIONSHIP = "database"
 
-    if config.appDir:  # (4)
-        STATIC_ROOT = Path(config.appDir) / 'static'
-    if config.projectEntropy:  # (5)
-        SECRET_KEY = config.projectEntropy
+# Helper function for decoding base64-encoded JSON variables.
+def decode(variable):
+    """Decodes a Platform.sh environment variable.
+    Args:
+        variable (string):
+            Base64-encoded JSON (the content of an environment variable).
+    Returns:
+        An dict (if representing a JSON object), or a scalar type.
+    Raises:
+        JSON decoding error.
+    """
+    try:
+        if sys.version_info[1] > 5:
+            return json.loads(base64.b64decode(variable))
+        else:
+            return json.loads(base64.b64decode(variable).decode('utf-8'))
+    except json.decoder.JSONDecodeError:
+        print('Error decoding JSON, code %d', json.decoder.JSONDecodeError)
 
-    if not config.in_build():
-        db_settings = config.credentials('database')  # (6)
+if (os.getenv('PLATFORM_APPLICATION_NAME') is not None):
+    DEBUG = False
+
+    # Redefine the static root based on the Platform.sh directory
+    # See https://docs.djangoproject.com/en/4.1/ref/settings/#static-root
+    if (os.getenv('PLATFORM_APP_DIR') is not None):
+        STATIC_ROOT = os.path.join(os.getenv('PLATFORM_APP_DIR'), 'static')
+
+    # PLATFORM_PROJECT_ENTROPY is unique to your project
+    # Use it to define define Django's SECRET_KEY
+    # See https://docs.djangoproject.com/en/4.1/ref/settings/#secret-key
+    if (os.getenv('PLATFORM_PROJECT_ENTROPY') is not None):
+        SECRET_KEY = os.getenv('PLATFORM_PROJECT_ENTROPY')
+
+    # Database service configuration, post-build only
+    # As services aren't available during the build
+    if (os.getenv('PLATFORM_ENVIRONMENT') is not None):
+        platformRelationships = decode(os.getenv('PLATFORM_RELATIONSHIPS'))
+        db_settings = platformRelationships[PLATFORMSH_DB_RELATIONSHIP][0]
         DATABASES = {
             'default': {
                 'ENGINE': 'django.db.backends.postgresql',
@@ -50,6 +84,10 @@ if config.is_valid_platform():  # (2)
                 'HOST': db_settings['host'],
                 'PORT': db_settings['port'],
             },
+            'sqlite': {
+                'ENGINE': 'django.db.backends.sqlite3',
+                'NAME': os.path.join(BASE_DIR, 'db.sqlite3'),
+            }
         }
 
 INSTALLED_APPS = [
@@ -97,12 +135,12 @@ WSGI_APPLICATION = "ll_project.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
-    }
-}
+# DATABASES = {
+#     "default": {
+#         "ENGINE": "django.db.backends.sqlite3",
+#         "NAME": BASE_DIR / "db.sqlite3",
+#     }
+# }
 
 # Password validation
 # https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators
